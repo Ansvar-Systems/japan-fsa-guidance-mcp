@@ -16,3 +16,5 @@ data/.ingest-*
 !PRIVACY.md
 !SECURITY.md
 !LICENSE
+.env
+.env.*
