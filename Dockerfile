@@ -21,12 +21,15 @@ COPY tsconfig.json ./
 COPY src/ ./src/
 COPY scripts/ ./scripts/
 COPY sources.yml ./
+COPY server.json ./
 
 # Build TypeScript
 RUN npm run build
 
-# Seed the sample database so the container works out-of-the-box
-RUN mkdir -p data && node dist/scripts/seed-sample.js
+# Copy real ingested database (built by `npm run ingest:full` and committed to repo).
+# Falls back to seeding a sample DB if the committed DB is missing.
+COPY data/ ./data/
+RUN mkdir -p data && ([ -f data/fsa-jp.db ] || node dist/scripts/seed-sample.js)
 
 # Remove dev dependencies
 RUN npm prune --omit=dev
