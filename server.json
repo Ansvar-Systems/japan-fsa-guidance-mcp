@@ -1,0 +1,11 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "jp.ansvar/japan-fsa-guidance-mcp",
+  "description": "Query Financial Services Agency of Japan (金融庁) supervisory guidelines, cyber security guidelines, AML/CFT guidelines, and inspection manuals",
+  "repository": { "url": "https://github.com/Ansvar-Systems/japan-fsa-guidance-mcp", "source": "github" },
+  "homepage": "https://ansvar.eu",
+  "version": "0.1.0",
+  "license": "BSL-1.1",
+  "keywords": ["fsa", "japan", "financial-regulation", "compliance", "mcp", "ansvar"],
+  "packages": [{ "registryType": "npm", "identifier": "@ansvar/japan-fsa-guidance-mcp", "version": "0.1.0", "transport": { "type": "stdio" } }]
+}

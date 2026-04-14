@@ -1,0 +1,24 @@
+schema_version: "1.0"
+mcp_name: "Japan FSA Financial Guidance MCP"
+category: "regulation"
+
+sources:
+  - name: "FSA Japan Supervisory Guidelines & Inspection Manuals"
+    authority: "Financial Services Agency of Japan (金融庁)"
+    official_portal: "https://www.fsa.go.jp/en/refer/guide/"
+    japanese_portal: "https://www.fsa.go.jp/common/law/"
+    retrieval_method: "HTML_SCRAPE"
+    format: "HTML + PDF"
+    authentication: "none"
+    update_frequency: "monthly"
+    license:
+      type: "government_terms"
+      url: "https://www.fsa.go.jp/"
+      summary: "Public FSA Japan supervisory guidelines and inspection materials"
+    coverage:
+      scope: "Comprehensive Guidelines for Supervision of Major Banks; Cyber Security Guidelines 2024; AML/CFT Guidelines; Comprehensive Inspection Manual; IT Inspection Standards"
+      version: "Current"
+      item_count: "~100-200 guidance documents"
+    languages:
+      - "en"
+      - "ja"
