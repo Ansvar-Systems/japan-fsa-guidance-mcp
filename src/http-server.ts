@@ -31,6 +31,13 @@ import {
   listCategories,
   getStats,
 } from "./db.js";
+import {
+  buildErrorPayload,
+  buildMeta,
+  DISCLAIMER,
+  SOURCE_URL,
+} from "./response-meta.js";
+import { buildFreshnessReport } from "./freshness.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -55,12 +62,9 @@ try {
   // fallback
 }
 
-const DISCLAIMER =
-  "This data is provided for informational reference only. It does not constitute legal or professional advice. " +
-  "Always verify against official FSA Japan publications at https://www.fsa.go.jp/. " +
-  "Japanese is the primary authoritative language; English translations are official FSA translations but may lag behind Japanese versions.";
-
-const SOURCE_URL = "https://www.fsa.go.jp/en/refer/guide/";
+// Re-exported text constants live in response-meta.ts so stdio + http stay
+// byte-identical.
+void DISCLAIMER;
 
 // --- Tool definitions ---------------------------------------------------------
 
@@ -181,6 +185,18 @@ const TOOLS = [
       required: [],
     },
   },
+  {
+    name: "jp_fsa_check_data_freshness",
+    description:
+      "Report per-source data age for the FSA Japan database. Reads coverage.json " +
+      "and flags sources that are past their expected refresh window. Use this to " +
+      "decide whether to trust the data for a critical compliance question.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+      required: [],
+    },
+  },
 ];
 
 // --- Zod schemas --------------------------------------------------------------
@@ -201,16 +217,6 @@ const SearchInspectionsArgs = z.object({
   domain: z.string().optional(),
   limit: z.number().int().positive().max(50).optional(),
 });
-
-// --- Helpers ------------------------------------------------------------------
-
-function buildMeta(sourceUrl?: string): Record<string, unknown> {
-  return {
-    disclaimer: DISCLAIMER,
-    data_age: "See coverage.json; refresh frequency: monthly",
-    source_url: sourceUrl ?? SOURCE_URL,
-  };
-}
 
 // --- MCP server factory -------------------------------------------------------
 
@@ -233,13 +239,6 @@ function createMcpServer(): Server {
       };
     }
 
-    function errorContent(message: string) {
-      return {
-        content: [{ type: "text" as const, text: message }],
-        isError: true as const,
-      };
-    }
-
     try {
       switch (name) {
         case "jp_fsa_search_guidance": {
@@ -258,11 +257,18 @@ function createMcpServer(): Server {
 
           const inspection = getInspection(docId);
           if (inspection) {
+            const titleEn = inspection.title_en?.length ? inspection.title_en : inspection.title_ja;
             return textContent({
               ...inspection,
               _citation: {
                 canonical_ref: inspection.item_ref,
-                display_text: `FSA Japan — ${inspection.title_en} (${inspection.item_ref})`,
+                display_text: `FSA Japan — ${titleEn} (${inspection.item_ref})`,
+                aliases: [inspection.item_ref],
+                source_url: SOURCE_URL,
+                lookup: {
+                  tool: "jp_fsa_get_guideline",
+                  args: { document_id: inspection.item_ref },
+                },
               },
               _meta: buildMeta(),
             });
@@ -270,19 +276,28 @@ function createMcpServer(): Server {
 
           const guideline = getGuideline(docId);
           if (guideline) {
+            const titleEn = guideline.title_en?.length ? guideline.title_en : guideline.title_ja;
+            const guidelineUrl = guideline.source_url ?? SOURCE_URL;
             return textContent({
               ...guideline,
               _citation: {
                 canonical_ref: guideline.reference,
-                display_text: `FSA Japan — ${guideline.title_en} (${guideline.reference})`,
+                display_text: `FSA Japan — ${titleEn} (${guideline.reference})`,
+                aliases: [guideline.reference],
+                source_url: guidelineUrl,
+                lookup: {
+                  tool: "jp_fsa_get_guideline",
+                  args: { document_id: guideline.reference },
+                },
               },
-              _meta: buildMeta(guideline.source_url ?? SOURCE_URL),
+              _meta: buildMeta(guidelineUrl),
             });
           }
 
-          return errorContent(
+          return buildErrorPayload(
             `No inspection item or guidance document found with reference: ${docId}. ` +
               "Use jp_fsa_search_guidance to find available references.",
+            "NO_MATCH",
           );
         }
 
@@ -334,12 +349,31 @@ function createMcpServer(): Server {
           });
         }
 
+        case "jp_fsa_check_data_freshness": {
+          const report = buildFreshnessReport();
+          return {
+            content: [{ type: "text" as const, text: report.text }],
+            _meta: buildMeta(),
+            _data: {
+              database_version: report.database_version,
+              database_built: report.database_built,
+              any_stale: report.any_stale,
+              sources: report.rows,
+              refresh_command: report.refresh_command,
+            },
+          };
+        }
+
         default:
-          return errorContent(`Unknown tool: ${name}`);
+          return buildErrorPayload(`Unknown tool: ${name}`, "INVALID_INPUT");
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      return errorContent(`Error executing ${name}: ${message}`);
+      const isZodError = err instanceof z.ZodError;
+      return buildErrorPayload(
+        `Error executing ${name}: ${message}`,
+        isZodError ? "INVALID_INPUT" : "NO_MATCH",
+      );
     }
   });
 
