@@ -41,8 +41,18 @@ interface FetchedDocument {
   url: string;
   category: string;
   filename: string;
+  lang?: string;
   text: string;
   fetchedAt: string;
+}
+
+/**
+ * Detect Japanese characters (Hiragana / Katakana / CJK Unified Ideographs)
+ * in a string. Used to decide whether a doc's title populates title_ja or
+ * title_en when the raw ingest only captures one language.
+ */
+function hasJapanese(s: string): boolean {
+  return /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]/.test(s);
 }
 
 interface CategoryRow {
@@ -106,12 +116,21 @@ function classifyDocument(doc: FetchedDocument): "framework" | "circular" | "unk
 }
 
 function inferCategoryId(doc: FetchedDocument): string {
+  // Derive a unique, stable id from filename so each framework doc gets its
+  // own category row (previously all bank docs collided on "fsa-sup-bank").
+  const fnBase = doc.filename
+    .replace(/\.(pdf|html|xlsx|xls)$/i, "")
+    .replace(/[^a-zA-Z0-9_-]/g, "-")
+    .toLowerCase()
+    .slice(0, 40);
   const fn = doc.filename.toLowerCase();
-  if (fn.includes("cyber")) return "fsa-cyber-2024";
-  if (fn.includes("aml") || fn.includes("money")) return "fsa-aml";
-  if (fn.includes("ins") || fn.includes("insurance")) return "fsa-sup-ins";
-  if (fn.includes("sec") || fn.includes("securities")) return "fsa-sup-sec";
-  return `fsa-sup-bank`;
+  let prefix = "fsa-sup-bank";
+  if (fn.includes("cyber")) prefix = "fsa-cyber";
+  else if (fn.includes("aml") || fn.includes("money") || fn.includes("amlcft") || fn.includes("hansyu")) prefix = "fsa-aml";
+  else if (fn.includes("ins") || fn.includes("syougaku") || fn.includes("ninka")) prefix = "fsa-sup-ins";
+  else if (fn.includes("sec") || fn.includes("kinyushohin") || fn.includes("securities")) prefix = "fsa-sup-sec";
+  else if (fn.includes("shintaku") || fn.includes("kashikin") || fn.includes("kinsa") || fn.includes("hosyokyokai") || fn.includes("seisan") || fn.includes("ftta") || fn.includes("kinyuadr") || fn.includes("kakuduke") || fn.includes("hft") || fn.includes("im-rs") || fn.includes("city") || fn.includes("chusho")) prefix = "fsa-sup";
+  return `${prefix}-${fnBase}`.slice(0, 60);
 }
 
 function inferGuidelineReference(doc: FetchedDocument): string {
@@ -232,13 +251,23 @@ async function main(): Promise<void> {
     const type = classifyDocument(doc);
     console.log(`Processing [${type}]: ${doc.title}`);
 
+    // Assign title to the correct language column based on content detection.
+    // Japanese is the primary source; docs without Japanese chars are English-only.
+    // Schema is NOT NULL on both columns, so we leave the other column as an
+    // empty string when that language isn't available (the read layer should
+    // treat "" as "missing translation" — downstream callers / tools check the
+    // companion column for a populated value).
+    const titleIsJa = hasJapanese(doc.title);
+    const title_ja = titleIsJa ? doc.title : "";
+    const title_en = titleIsJa ? "" : doc.title;
+
     if (type === "framework") {
       // Treat FSA guidance frameworks (supervisory guidelines, inspection manuals) as categories
       const categoryId = inferCategoryId(doc);
       const result = insertCategory.run(
         categoryId,
-        doc.title, // title_ja — populated with English title during build; real ingest populates both
-        doc.title, // title_en
+        title_ja,
+        title_en,
         null,
         doc.category,
         buildSummary(doc.text, 1000),
@@ -248,16 +277,16 @@ async function main(): Promise<void> {
       );
       if (result.changes > 0) categoriesInserted++;
 
-      // For a real implementation, parse the HTML/PDF text to extract individual inspection items.
-      // FSA documents use numbered section schemes (e.g., "Ⅱ-1-1", "別紙").
-      // Here we insert one placeholder inspection item per document to demonstrate the flow.
+      // Insert one inspection item per document as a starting structure.
+      // Full section-level parsing is a future enhancement (FSA docs use
+      // numbered schemes like "Ⅱ-1-1" / "別紙").
       const inspectionResult = insertInspection.run(
         categoryId,
-        `${categoryId.toUpperCase()}-AUTO-1`,
+        `${categoryId.toUpperCase()}-AUTO-${guidelinesInserted + inspectionsInserted + 1}`,
         doc.category,
         "General",
-        doc.title, // title_ja
-        `${doc.title} — General Requirements`, // title_en
+        title_ja || doc.title,
+        title_en || `${doc.title} — General Requirements`,
         doc.text.substring(0, 2000) || "See full document for requirements.",
         "Required",
         "High",
@@ -267,8 +296,8 @@ async function main(): Promise<void> {
       const reference = inferGuidelineReference(doc);
       const result = insertGuideline.run(
         reference,
-        doc.title, // title_ja
-        doc.title, // title_en
+        title_ja,
+        title_en,
         extractDate(doc.text),
         doc.category,
         buildSummary(doc.text),

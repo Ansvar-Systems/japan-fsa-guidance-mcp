@@ -1,0 +1,41 @@
+{
+  "generatedAt": "2026-04-14T05:52:09.451Z",
+  "mcp": "japan-fsa-guidance-mcp",
+  "version": "0.1.0",
+  "sources": [
+    {
+      "name": "FSA Japan Supervisory Guidelines & Inspection Manuals (English portal)",
+      "url": "https://www.fsa.go.jp/en/refer/guide/",
+      "last_fetched": "2026-04-14T05:52:09.451Z",
+      "update_frequency": "monthly",
+      "item_count": 14,
+      "status": "current"
+    },
+    {
+      "name": "FSA Japan Laws & Guidelines catalog (Japanese primary portal)",
+      "url": "https://www.fsa.go.jp/common/law/",
+      "last_fetched": "2026-04-14T05:52:09.451Z",
+      "update_frequency": "monthly",
+      "item_count": 75,
+      "status": "current"
+    }
+  ],
+  "totals": {
+    "categories": 29,
+    "inspections": 29,
+    "guidelines": 60,
+    "total": 118
+  },
+  "bilingual": {
+    "categories": {
+      "ja_only": 22,
+      "en_only": 7,
+      "both": 0
+    },
+    "guidelines": {
+      "ja_only": 53,
+      "en_only": 7,
+      "both": 0
+    }
+  }
+}

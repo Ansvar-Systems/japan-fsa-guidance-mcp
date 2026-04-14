@@ -33,8 +33,19 @@ import { join, basename } from "node:path";
 const BASE_URL = "https://www.fsa.go.jp";
 // English portal — subset of guidance available in English
 const EN_PORTAL_URL = `${BASE_URL}/en/refer/guide/`;
+// Additional EN index pages to crawl for document links
+const EN_INDEX_URLS = [
+  `${BASE_URL}/en/refer/guide/`,
+  `${BASE_URL}/en/refer/legislation/index.html`,
+];
 // Japanese primary portal — comprehensive law and guidelines list
 const JA_PORTAL_URL = `${BASE_URL}/common/law/`;
+// Additional JA index pages to crawl for document links
+const JA_INDEX_URLS = [
+  `${BASE_URL}/common/law/`,
+  `${BASE_URL}/common/law/guide.html`,   // 監督指針一覧 — Supervisory Guidelines catalog
+  `${BASE_URL}/common/law/kokuji.html`,  // 告示・ガイドライン・Ｑ＆Ａ — Notices & Guidelines
+];
 const RAW_DIR = "data/raw";
 const RATE_LIMIT_MS = 2500;  // fsa.go.jp rate limiting — be conservative
 const MAX_RETRIES = 3;
@@ -222,25 +233,108 @@ async function scrapePortal(portalUrl: string, lang: "en" | "ja"): Promise<Docum
 
   const links: DocumentLink[] = [];
 
+  // Index pages like guide.html / kokuji.html list concrete documents but their
+  // link text is often just "HTML版" / "PDF版（2,493KB）" — these don't match
+  // GUIDANCE_KEYWORDS. For those index pages we bypass the keyword filter
+  // and accept any link under /common/law/guide/ or /common/law/kokuji/ or
+  // /en/refer/guide/ as a document link. We still carry an enriched title
+  // from the nearest preceding heading / list item.
+  const isIndexPage =
+    portalUrl.includes("/common/law/guide.html") ||
+    portalUrl.includes("/common/law/kokuji.html") ||
+    portalUrl.includes("/en/refer/legislation/") ||
+    portalUrl.includes("/en/refer/guide/");
+
   $("a[href]").each((_, el) => {
     const href = $(el).attr("href") ?? "";
-    const title = $(el).text().trim();
+    const linkText = $(el).text().trim();
 
-    if (!href || !title) return;
-    // Accept PDFs and HTML guidance pages
+    if (!href || !linkText) return;
+
     const isPdf = href.toLowerCase().endsWith(".pdf");
-    const isHtmlGuidance =
-      href.includes("/common/law/") ||
-      href.includes("/en/refer/") ||
-      href.includes("/news/") ||
-      href.includes("/policy/");
+    const isHtml = href.toLowerCase().endsWith(".html") || href.endsWith("/");
+    if (!isPdf && !isHtml) return;
 
-    if (!isPdf && !isHtmlGuidance) return;
-    if (!isGuidanceRelevant(title)) return;
+    // Keep only links pointing at actual FSA document paths we care about
+    const looksLikeDocumentPath =
+      href.includes("/common/law/guide/") ||
+      href.includes("/common/law/kokuji/") ||
+      href.includes("/en/refer/guide/") ||
+      href.includes("/en/refer/legislation/") ||
+      (href.includes("/news/") && (isPdf || href.includes("cyber") || href.includes("aml"))) ||
+      (href.includes("/policy/") && (isPdf || href.includes("cyber") || href.includes("aml")));
 
+    if (!looksLikeDocumentPath) return;
+
+    // Skip self-navigation anchors / index page roots we already crawled
     const fullUrl = href.startsWith("http") ? href : `${BASE_URL}${href.startsWith("/") ? "" : "/"}${href}`;
+    if (
+      fullUrl === portalUrl ||
+      fullUrl === EN_PORTAL_URL ||
+      fullUrl === JA_PORTAL_URL ||
+      fullUrl.endsWith("/common/law/guide.html") ||
+      fullUrl.endsWith("/common/law/kokuji.html") ||
+      fullUrl.endsWith("/en/refer/legislation/index.html")
+    ) {
+      return;
+    }
+
+    // Derive a better title. Index pages use "HTML版" / "PDF版（XKB）" for
+    // every row and the real doc title sits in the parent <li>'s leading text
+    // (before the nested <ul> of format options).
+    let title = linkText;
+    const isGenericLink =
+      /^(HTML版|PDF版|別紙|様式|rating|pdf|\(PDF|Available in Japanese)/i.test(linkText) ||
+      linkText.length < 6;
+    if (isGenericLink) {
+      // Walk up parent <li>s. The real doc title is on an ancestor li whose
+      // leading (non-nested-ul) text is descriptive — not a format label like
+      // "本文" / "英語版" / "HTML版". We stop at the FIRST ancestor li whose
+      // outer text (after removing nested ul/ol) is >= 10 chars AND does not
+      // start with a format-label prefix.
+      const REJECT_PREFIX = /^(HTML版|PDF版|別紙|様式|本文|英語版|日本語版|Available in Japanese|\(PDF|EXCEL|PDF:)/i;
+      let chosen = "";
+      $(el).parentsUntil("body", "li").each((_, liEl) => {
+        const $li = $(liEl);
+        const clone = $li.clone();
+        clone.find("ul,ol").remove();
+        const outer = clone.text().replace(/\s+/g, " ").trim();
+        if (outer && outer.length >= 10 && !REJECT_PREFIX.test(outer)) {
+          chosen = outer;
+          return false; // innermost descriptive ancestor wins
+        }
+        return undefined;
+      });
+      if (chosen) {
+        title = chosen.slice(0, 220);
+      } else {
+        const $row = $(el).closest("li,tr,p,div,section").first();
+        const heading = $row.prevAll("h1,h2,h3,h4,h5").first().text().trim();
+        if (heading) title = `${heading} — ${linkText}`.slice(0, 220);
+      }
+    }
+
+    // On non-index portal pages still apply keyword relevance; on index pages
+    // the path filter above is authoritative.
+    if (!isIndexPage && !isGuidanceRelevant(title)) return;
+
     const rawFilename = basename(href.split("?")[0] ?? href);
-    const filename = rawFilename || `fsa-doc-${lang}-${links.length + 1}.${isPdf ? "pdf" : "html"}`;
+    // For directory-style URLs (/guide/city/index.html → "index.html"), derive
+    // a unique filename from the parent path segment so raw files don't collide.
+    let filename = rawFilename;
+    if (!filename || filename === "index.html" || filename === "") {
+      const parts = href.split("?")[0]!.split("/").filter(Boolean);
+      const segment = parts[parts.length - 2] ?? `fsa-${lang}-${links.length + 1}`;
+      filename = `fsa-${lang}-${segment}.html`;
+    } else if (!isPdf && !filename.endsWith(".html")) {
+      filename = `${filename}.html`;
+    }
+    // Guarantee uniqueness
+    if (links.some((l) => l.filename === filename)) {
+      const parts = href.split("?")[0]!.split("/").filter(Boolean);
+      const segment = parts[parts.length - 2] ?? "x";
+      filename = `${segment}-${filename}`;
+    }
 
     if (links.some((l) => l.url === fullUrl)) return;
 
@@ -313,11 +407,19 @@ async function main(): Promise<void> {
     console.log(`Created directory: ${RAW_DIR}`);
   }
 
-  // Scrape both English and Japanese portals
-  const [enLinks, jaLinks] = await Promise.all([
-    scrapePortal(EN_PORTAL_URL, "en"),
-    scrapePortal(JA_PORTAL_URL, "ja"),
-  ]);
+  // Scrape all configured EN and JA index pages in sequence (rate limited)
+  const enLinksArrays: DocumentLink[][] = [];
+  for (const url of EN_INDEX_URLS) {
+    enLinksArrays.push(await scrapePortal(url, "en"));
+    await sleep(RATE_LIMIT_MS);
+  }
+  const jaLinksArrays: DocumentLink[][] = [];
+  for (const url of JA_INDEX_URLS) {
+    jaLinksArrays.push(await scrapePortal(url, "ja"));
+    await sleep(RATE_LIMIT_MS);
+  }
+  const enLinks = enLinksArrays.flat();
+  const jaLinks = jaLinksArrays.flat();
 
   let documents: DocumentLink[] = [...enLinks, ...jaLinks];
 

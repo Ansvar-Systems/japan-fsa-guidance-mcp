@@ -1,8 +1,8 @@
 /**
  * Update data/coverage.json with current database statistics.
  *
- * Reads the SAMA SQLite database and writes a coverage summary file
- * used by the freshness checker, fleet manifest, and the sa_sama_about tool.
+ * Reads the Japan FSA SQLite database and writes a coverage summary file
+ * used by the freshness checker and the fleet manifest.
  *
  * Usage:
  *   npx tsx scripts/update-coverage.ts
@@ -12,19 +12,13 @@ import Database from "better-sqlite3";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
-const DB_PATH = process.env["SAMA_DB_PATH"] ?? "data/sama.db";
+const DB_PATH = process.env["FSA_JP_DB_PATH"] ?? "data/fsa-jp.db";
 const COVERAGE_FILE = "data/coverage.json";
 
-interface CoverageFile {
-  generatedAt: string;
-  mcp: string;
-  version: string;
-  sources: CoverageSource[];
-  totals: {
-    frameworks: number;
-    controls: number;
-    circulars: number;
-  };
+interface BilingualBreakdown {
+  ja_only: number;
+  en_only: number;
+  both: number;
 }
 
 interface CoverageSource {
@@ -36,39 +30,84 @@ interface CoverageSource {
   status: "current" | "stale" | "unknown";
 }
 
+interface CoverageFile {
+  generatedAt: string;
+  mcp: string;
+  version: string;
+  sources: CoverageSource[];
+  totals: {
+    categories: number;
+    inspections: number;
+    guidelines: number;
+    total: number;
+  };
+  bilingual: {
+    categories: BilingualBreakdown;
+    guidelines: BilingualBreakdown;
+  };
+}
+
 async function main(): Promise<void> {
   if (!existsSync(DB_PATH)) {
     console.error(`Database not found: ${DB_PATH}`);
-    console.error("Run: npm run seed  or  npm run build:db");
+    console.error("Run: npm run ingest:full");
     process.exit(1);
   }
 
   const db = new Database(DB_PATH, { readonly: true });
 
-  const frameworks = (db.prepare("SELECT COUNT(*) AS n FROM frameworks").get() as { n: number }).n;
-  const controls = (db.prepare("SELECT COUNT(*) AS n FROM controls").get() as { n: number }).n;
-  const circulars = (db.prepare("SELECT COUNT(*) AS n FROM circulars").get() as { n: number }).n;
+  const categories = (db.prepare("SELECT COUNT(*) AS n FROM categories").get() as { n: number }).n;
+  const inspections = (db.prepare("SELECT COUNT(*) AS n FROM inspections").get() as { n: number }).n;
+  const guidelines = (db.prepare("SELECT COUNT(*) AS n FROM guidelines").get() as { n: number }).n;
 
-  // Get last-inserted date if available
-  const latestCircular = db
-    .prepare("SELECT date FROM circulars ORDER BY date DESC LIMIT 1")
+  // Bilingual breakdown — schema uses NOT NULL with "" as "missing translation"
+  const catJaOnly = (db.prepare("SELECT COUNT(*) AS n FROM categories WHERE name_ja != '' AND name_en = ''").get() as { n: number }).n;
+  const catEnOnly = (db.prepare("SELECT COUNT(*) AS n FROM categories WHERE name_en != '' AND name_ja = ''").get() as { n: number }).n;
+  const catBoth = (db.prepare("SELECT COUNT(*) AS n FROM categories WHERE name_ja != '' AND name_en != ''").get() as { n: number }).n;
+
+  const gdJaOnly = (db.prepare("SELECT COUNT(*) AS n FROM guidelines WHERE title_ja != '' AND title_en = ''").get() as { n: number }).n;
+  const gdEnOnly = (db.prepare("SELECT COUNT(*) AS n FROM guidelines WHERE title_en != '' AND title_ja = ''").get() as { n: number }).n;
+  const gdBoth = (db.prepare("SELECT COUNT(*) AS n FROM guidelines WHERE title_ja != '' AND title_en != ''").get() as { n: number }).n;
+
+  // Get latest date for freshness heuristic
+  const latest = db
+    .prepare("SELECT date FROM guidelines WHERE date IS NOT NULL ORDER BY date DESC LIMIT 1")
     .get() as { date: string } | undefined;
+
+  const total = categories + inspections + guidelines;
 
   const coverage: CoverageFile = {
     generatedAt: new Date().toISOString(),
-    mcp: "saudi-sama-cybersecurity-mcp",
+    mcp: "japan-fsa-guidance-mcp",
     version: "0.1.0",
     sources: [
       {
-        name: "SAMA Rules & Instructions",
-        url: "https://www.sama.gov.sa/en-US/RulesInstructions/Pages/default.aspx",
-        last_fetched: latestCircular?.date ?? null,
-        update_frequency: "quarterly",
-        item_count: frameworks + controls + circulars,
+        name: "FSA Japan Supervisory Guidelines & Inspection Manuals (English portal)",
+        url: "https://www.fsa.go.jp/en/refer/guide/",
+        last_fetched: new Date().toISOString(),
+        update_frequency: "monthly",
+        item_count: catEnOnly + gdEnOnly + catBoth + gdBoth,
+        status: "current",
+      },
+      {
+        name: "FSA Japan Laws & Guidelines catalog (Japanese primary portal)",
+        url: "https://www.fsa.go.jp/common/law/",
+        last_fetched: latest?.date ?? new Date().toISOString(),
+        update_frequency: "monthly",
+        item_count: catJaOnly + gdJaOnly + catBoth + gdBoth,
         status: "current",
       },
     ],
-    totals: { frameworks, controls, circulars },
+    totals: {
+      categories,
+      inspections,
+      guidelines,
+      total,
+    },
+    bilingual: {
+      categories: { ja_only: catJaOnly, en_only: catEnOnly, both: catBoth },
+      guidelines: { ja_only: gdJaOnly, en_only: gdEnOnly, both: gdBoth },
+    },
   };
 
   const dir = dirname(COVERAGE_FILE);
@@ -77,9 +116,12 @@ async function main(): Promise<void> {
   writeFileSync(COVERAGE_FILE, JSON.stringify(coverage, null, 2), "utf8");
 
   console.log(`Coverage updated: ${COVERAGE_FILE}`);
-  console.log(`  Frameworks : ${frameworks}`);
-  console.log(`  Controls   : ${controls}`);
-  console.log(`  Circulars  : ${circulars}`);
+  console.log(`  Categories  : ${categories}`);
+  console.log(`  Inspections : ${inspections}`);
+  console.log(`  Guidelines  : ${guidelines}`);
+  console.log(`  Total       : ${total}`);
+  console.log(`  Bilingual (categories) : ja_only=${catJaOnly} en_only=${catEnOnly} both=${catBoth}`);
+  console.log(`  Bilingual (guidelines) : ja_only=${gdJaOnly} en_only=${gdEnOnly} both=${gdBoth}`);
 }
 
 main().catch((err) => {
