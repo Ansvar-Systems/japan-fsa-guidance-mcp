@@ -1,0 +1,18 @@
+# Code owners for the Japan FSA Financial Guidance MCP.
+#
+# These owners receive automatic review requests on every pull request touching
+# the matched paths. The fallback rule (*) ensures every change has at least
+# one reviewer.
+
+* @Ansvar-Systems/mcp-maintainers
+
+# Data + ingestion pipeline
+/data/             @Ansvar-Systems/mcp-maintainers
+/scripts/          @Ansvar-Systems/mcp-maintainers
+/sources.yml       @Ansvar-Systems/mcp-maintainers
+
+# CI / release
+/.github/          @Ansvar-Systems/mcp-maintainers
+/Dockerfile        @Ansvar-Systems/mcp-maintainers
+/server.json       @Ansvar-Systems/mcp-maintainers
+/package.json      @Ansvar-Systems/mcp-maintainers
