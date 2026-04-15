@@ -1,0 +1,70 @@
+{
+  "schema_version": "1.0",
+  "mcp_name": "japan-fsa-guidance-mcp",
+  "mcp_type": "regulatory_publications",
+  "census_date": "2026-04-14",
+  "agent": "claude-opus-4-6",
+  "summary": {
+    "total_items": 118,
+    "categories": 29,
+    "inspections": 29,
+    "guidelines": 60,
+    "sources": 2,
+    "languages": 2
+  },
+  "sources": [
+    {
+      "id": "fsa-jp-ja",
+      "name": "FSA Japan Laws & Guidelines catalog (Japanese primary portal)",
+      "portal_url": "https://www.fsa.go.jp/common/law/",
+      "language": "ja",
+      "authority": "Financial Services Agency of Japan (金融庁)",
+      "document_count": 75,
+      "item_type": "guideline_catalogue_entries",
+      "last_scraped": "2026-04-14",
+      "last_verified": "2026-04-14",
+      "verification_method": "page_scraped",
+      "completeness": "partial",
+      "completeness_note": "Top-level catalogue; section-level inspection items (Ⅱ-1-1, 別紙) stored at framework granularity in current ingest."
+    },
+    {
+      "id": "fsa-jp-en",
+      "name": "FSA Japan Supervisory Guidelines & Inspection Manuals (English portal)",
+      "portal_url": "https://www.fsa.go.jp/en/refer/guide/",
+      "language": "en",
+      "authority": "Financial Services Agency of Japan (金融庁)",
+      "document_count": 14,
+      "item_type": "official_english_translations",
+      "last_scraped": "2026-04-14",
+      "last_verified": "2026-04-14",
+      "verification_method": "page_scraped",
+      "completeness": "partial",
+      "completeness_note": "Subset of Japanese-only content. English translations published by FSA can lag Japanese releases by 1–6 months."
+    }
+  ],
+  "categories": {
+    "supervisory_guidelines": {
+      "description": "Comprehensive Guidelines for Supervision of Major Banks, Insurance, and Securities",
+      "language": "ja + en"
+    },
+    "cyber_security_2024": {
+      "description": "FSA Cyber Security Guidelines 2024 for Japanese financial institutions",
+      "language": "ja + en"
+    },
+    "aml_cft": {
+      "description": "Anti-Money Laundering and Counter-Terrorism Financing Guidelines",
+      "language": "ja + en"
+    },
+    "inspection_manual": {
+      "description": "Comprehensive Inspection Manual covering credit/market/liquidity/operational risk, IT systems, customer protection",
+      "language": "ja + en"
+    }
+  },
+  "bilingual_pair_matching": false,
+  "bilingual_pair_matching_note": "Japanese and English versions of the same FSA document are currently treated as independent rows. Cross-language title canonicalisation is planned for 0.2.0.",
+  "notes": [
+    "This MCP provides supervisory guidance and inspection standards, not primary legislation. Statute text should be retrieved from a law MCP (out of scope here).",
+    "FSA regulations are subject to change; confirm currency with jp_fsa_check_data_freshness before reliance.",
+    "The Japanese text is the authoritative regulatory version; English translations are official but may lag."
+  ]
+}
